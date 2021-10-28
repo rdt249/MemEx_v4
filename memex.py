@@ -1,6 +1,6 @@
 ########## VERSION 4.0 ####################
 # University of Tennessee at Chattanooga
-# RES Lab / UTChattSat Club
+# RES Lab & UTChattSat
 # Stephen Lawrence (rdt249@mocs.utc.edu)
 '''
 This script can be imported into another python script with the line:
@@ -40,6 +40,22 @@ log_header = ['Command(str)',
               'FaultsA1(#)','FaultsA2(#)','FaultsA3(#)','FaultsB1(#)','FaultsB2(#)','FaultsB3(#)',
               'FaultsC1(#)','FaultsC2(#)','FaultsC3(#)','FaultsD1(#)','FaultsD2(#)','FaultsD3(#)',
               'Output(file)']
+
+################ FAULT INJECTION ###################
+
+import numpy as np
+def random_scan() :
+    size_arr = np.array(size)
+    nom_arr = np.array(nominal)
+    volt_arr = np.array(voltage)
+    mu = size_arr * (nom_arr - volt_arr)
+    sigma = mu/10
+    faults = [None] * 12
+    for i in range(4) :
+        for j in range(3) :
+            faults[3*i+j] = np.random.normal(mu[i],sigma[i],1).values
+    return faults.tolist()
+        
 
 ################# FUNCTIONS ######################
 

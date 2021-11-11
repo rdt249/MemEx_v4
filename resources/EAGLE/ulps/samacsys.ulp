@@ -1,0 +1,639 @@
+#usage "<b>Search and Download free EAGLE symbols and footprints</b><p>\n"
+"Version: 2.2 - The SamacSys Autodesk EAGLE ULP - 30-4-20<br/>"
+"<author>Author: SamacSys (info@samacsys.com). Visit https://componentsearchengine.com to learn more.</author>"
+#require 5.1000
+string version = "V2.2";  //Plugin version
+#include "json.inc"
+
+string partsListHeader = "Symbol\tFootprint\t3D\tDatasheet\tDescription\tManufacturer\tManufacturer Part No";
+
+string getHomePage (){
+     string homepage;
+     homepage = "https://componentsearchengine.com/ExtRef/ulp/ulp2.htm";
+     if( netget( homepage, homepage) >= 0 ){
+          return homepage; }
+     else {
+          // Failed to connect to server
+          return "Problem connecting to SamacSys. Please check your internet connection.";
+          }
+  }
+
+string getAddPartPage (){
+	string addPartPage;
+	addPartPage = "https://componentsearchengine.com/ExtRef/ulp/AddPart.htm";
+	if( netget( addPartPage, addPartPage) >= 0 ){
+		return addPartPage; }
+	else {
+		// Failed to connect to server
+		return "Problem connecting to SamacSys. Please check your internet connection.";
+	}
+}
+
+string getAddPartPage2 (){
+	string addPartPage2;
+	addPartPage2 = "https://componentsearchengine.com/ExtRef/ulp/AddPart2.htm";
+	if( netget( addPartPage2, addPartPage2) >= 0 ){
+		return addPartPage2; }
+	else {
+		// Failed to connect to server
+		return "Problem connecting to SamacSys. Please check your internet connection.";
+	}
+}
+  
+string partsList[];        // Parts converted to a list for displaying (part of information)
+int    selectedPart = -1;              // Part currently selected
+int    ATLC = cfgget("ULP:samacsys.ATLC") == "1";
+int    ShowAddPart = cfgget("ULP:samacsys.ShowAddPart") == "1";
+int    CloseULP = cfgget("ULP:samacsys.CloseULP") == "1";
+int    Dnld3D = cfgget("ULP:samacsys.Dnld3D") == "1";
+int    selectedLib = 0;
+string stepDir;
+string stpFile;
+string stpFilename;
+string eagleURL;
+string response;
+string user[];
+string pass[];
+string username;
+string usernameXML;
+string password;
+string trimPassword;
+string maskedPassword = "************";
+string settingsXML;
+string loginResponse;
+
+string part;
+string parts;
+string partDetails;
+string usedLib;
+int lbrFound = 0;
+int indexSP;
+
+string devName;
+
+string partId[];
+string ecadM[];
+string has3D[];
+string datasheet[];
+string desc[];
+string manuf[];
+string manufSend;
+string partNo[];
+string partNoSend;
+string quality[];
+
+string partsArray[];
+
+string Library;
+string libraries[];
+
+string HTMLPane = "";
+
+
+/************** Functions ****************************************************************/
+
+string urlEncode(string str) {
+string strEncode = "";
+string buffer = "";
+for (int i = 0; str[i]; i++) {
+	if (isalpha(str[i])) {
+		strEncode += str[i];
+	}
+    else {
+		sprintf(buffer,"%x",int(str[i]));
+		strEncode += "\%"+buffer;
+	}
+}
+return strEncode;
+}
+
+string trim(string str) {
+
+do {
+	int pos = strchr(str, ' ');
+	if (pos==0) str = strsub(str,1);
+}while (strchr(str, ' ') == 0);
+
+do {
+	int pos = strrchr(str, ' ');
+	if (pos==strlen(str)-1) str = strsub(str,0,strlen(str)-1);
+}while (strrchr(str, ' ') == strlen(str)-1);
+
+return str;
+}
+
+// Get the part data
+void updatePartDetails(int prtI) {
+strsplit(partId, (json_GetKeyItem(partsArray[prtI],"PartID")), '"');
+strsplit(ecadM, (json_GetKeyItem(partsArray[prtI],"ECAD_M")), '"');
+strsplit(has3D, (json_GetKeyItem(partsArray[prtI],"Has3D")), '"');
+strsplit(datasheet, (json_GetKeyItem(partsArray[prtI],"Datasheet")), '"');
+strsplit(desc, (json_GetKeyItem(partsArray[prtI],"Desc")), '"');
+desc[1] = strsub(desc[1], 0, 37);
+if (strlen(desc[1]) == 37) desc[1] += "...";
+strsplit(manuf, (json_GetKeyItem(partsArray[prtI],"Manuf")), '"');
+strsplit(partNo, (json_GetKeyItem(partsArray[prtI],"PartNo")), '"');
+strsplit(quality, (json_GetKeyItem(partsArray[prtI],"Quality")), '"');
+if (ecadM[1]!="") {
+	ecadM[1] = " Yes";
+}
+else {
+	ecadM[1] = "-No-";
+}
+if (has3D[1]=="Y" || has3D[1]=="E"){
+	has3D[1] = " Yes";
+}
+else {
+	has3D[1] = "-No-";
+}
+if (datasheet[1]!="") {
+	datasheet[1] = " Yes"; 
+}
+else {
+	datasheet[1] = "-No-";
+}
+//encode manuf
+manufSend = urlEncode(manuf[1]);
+partNoSend = urlEncode(partNo[1]);
+}
+
+string getPartDetailsPage (string partID){
+	string homepage;
+	homepage = "https://eagle.componentsearchengine.com/tools/Eagle/index.php?partID=" + partID + "&mna=" + manufSend + "&mpn=" + partNoSend;
+	if( netget( homepage, homepage) >= 0 ){
+		return homepage; }
+	else {
+		// Failed to connect to server
+		return "Problem connecting to SamacSys. Please check your internet connection.";
+	}
+}
+
+string strReplace(string str, string from, string to) {
+
+	string StrRepl[] = {from, to};
+	int o = 0;
+	for (int x = 0; StrRepl[x]; ) {
+	 o = strstr(str, StrRepl[x], o);
+	 if (o >= 0) {
+		str = strsub(str, 0, o) + StrRepl[x + 1] + strsub(str, o + strlen(StrRepl[x]));
+		o += strlen(StrRepl[x + 1]);
+	 }
+	 else {
+		x += 2;
+		o = 0;
+	 }
+	}
+	return str;
+
+}
+
+void SaveCfg(void) {
+   cfgset("ULP:samacsys.Email", usernameXML);
+   cfgset("ULP:samacsys.Pass", password);
+   cfgset("ULP:samacsys.ATLC", ATLC ? "1" : "0");
+   cfgset("ULP:samacsys.ShowAddPart", ShowAddPart ? "1" : "0");
+   cfgset("ULP:samacsys.CloseULP", CloseULP ? "1" : "0");
+   cfgset("ULP:samacsys.Dnld3D", Dnld3D ? "1" : "0");
+   cfgset("ULP:samacsys.Library", Library);
+   cfgset("ULP:samacsys.StepFolder", stepDir);
+}
+
+void ShowSelection(void)
+{
+updatePartDetails(selectedPart);
+HTMLPane = getPartDetailsPage(partId[0]);
+}
+
+string Int2Str(int i) {
+   string str;
+   sprintf(str, "%d", i);
+   return str;
+}
+
+void getLbr(string partID)
+{
+	if (ecadM[1] == "-No-" & has3D[1] == "-No-") {
+		dlgMessageBox("Please click \"Build or Free Request\"");
+	} 
+	else {
+		if (partID != "") {
+			if (ecadM[1] == "-No-" & has3D[1] == " Yes") {
+				if (has3D[1] == " Yes" && stepDir != "") {
+					eagleURL = "https://" + username + ":" + password + "@componentsearchengine.com/ga/model.php?partID=" + partID + "&st=12&lt=11&pi=1&step=1";
+				}
+				if (netget(response, eagleURL) >=0) {
+					int err = strstr(response, "Error:");
+					if (err >= 0) {
+						dlgMessageBox(response);
+						exit(1);
+					}
+					
+					string eagleFile[];
+					int n = strsplit(eagleFile,response,'|');
+					
+					stpFilename = eagleFile[0];
+					if (stpFilename != "") {
+						if (Dnld3D) {
+							stpFile = eagleFile[1];
+							output(stepDir + "/" + stpFilename, "wtF")							
+							printf(stpFile);
+							if (!ATLC) {
+								dlgMessageBox(stpFilename + " saved to your 3D Model Folder");
+							}
+						}
+						else {
+							dlgMessageBox("This part includes 3D only, please check \"Download 3D Models\" if you wish to download the STEP file to your 3D Model Folder");
+						}
+					}
+				}
+				else {
+					stpFilename = neterror();
+				}					
+			}
+			else {
+				if (quality[1] == "0") {
+					dlgMessageBox("Warning - User contributed part! \n Please take extra care when checking.");
+				}
+				string lbrFile; //SamacSys EAGLE library part
+				string oldXML; //existing EAGLE library
+				string newXML = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE eagle SYSTEM \"eagle.dtd\">\n<eagle version=\"7.7.0\">\n<drawing>\n"; //new EAGLE library
+				string settings;
+				string grid = "<grid distance=\"0.1\" unitdist=\"inch\" unit=\"inch\" style=\"lines\" multiple=\"1\" display=\"no\" altdistance=\"0.01\" altunitdist=\"inch\" altunit=\"inch\"/>\n";
+				string layers;
+				int i;
+				int n;
+				string packages[]; //existing packages in selected EAGLE library
+				string symbols[]; //existing symbols in selected EAGLE library
+				string devices[]; //existing devices in selected EAGLE library
+				
+				if (has3D[1] == " Yes" && stepDir != "") {
+					eagleURL = "https://" + username + ":" + password + "@componentsearchengine.com/ga/model.php?partID=" + partID + "&st=12&lt=11&pi=1&step=1";
+				}
+				else {
+					eagleURL = "https://" + username + ":" + password + "@componentsearchengine.com/ga/model.php?partID=" + partID + "&st=12&lt=11&pi=1";
+				}
+
+				if (netget(response, eagleURL) >=0) {
+					int err = strstr(response, "Error:");
+					if (err >= 0) {
+						dlgMessageBox(response);
+						exit(1);
+					}
+					
+					string eagleFile[];
+					int n = strsplit(eagleFile,response,'|');
+					lbrFile = eagleFile[0];
+					
+					stpFilename = eagleFile[1];
+					if (stpFilename != "" && Dnld3D) {
+						stpFile = eagleFile[2];
+						output(stepDir + "/" + stpFilename, "wtF")
+						printf(stpFile);
+					}
+
+					n = fileread(oldXML, Library);
+					settings = xmlelement(oldXML, "eagle/drawing/settings");
+					layers = xmlelement(oldXML, "eagle/drawing/layers");
+					newXML += settings + grid + layers + "<library>\n<description>&lt;b&gt;https://eagle.componentsearchengine.com&lt;/b&gt;&lt;p&gt;&lt;author&gt;Created by SamacSys&lt;/author&gt;</description>\n";
+					
+					newXML += "<packages>\n";
+					string pkgFound = "false";
+					string pkgName = xmlattribute(lbrFile, "eagle/drawing/library/packages/package", "name");
+					string newPkg = xmlelement(lbrFile, "eagle/drawing/library/packages/package");
+					n = xmlelements(packages, oldXML, "eagle/drawing/library/packages/package");
+					for (i = 0; i < n; ++i) {
+						string existPkgName = xmlattribute(packages[i], "package", "name");
+						if (existPkgName == pkgName) {
+							pkgFound = "true";
+							if (dlgMessageBox("Package '" + pkgName + "' already exists in " + Library + "\r\n\r\n OK to overwrite?", "&Yes", "&No") ==  0) {
+							//overwrite package
+								newXML += newPkg;				
+							}
+							else {
+								newXML += packages[i];
+							}
+						}
+						else {
+							newXML += packages[i];
+						}
+					}
+					if (pkgFound == "false") newXML += newPkg;
+					newXML += "</packages>\n";
+					
+					newXML += "<symbols>\n";
+					string symFound = "false";
+					string symName = xmlattribute(lbrFile, "eagle/drawing/library/symbols/symbol", "name");
+					string newSym = xmlelement(lbrFile, "eagle/drawing/library/symbols/symbol");
+					n = xmlelements(symbols, oldXML, "eagle/drawing/library/symbols/symbol");
+					for (i = 0; i < n; ++i) {
+						string existSymName = xmlattribute(symbols[i], "symbol", "name");
+						if (existSymName == symName) {
+							symFound = "true";
+							if (dlgMessageBox("Symbol '" + symName + "' already exists in " + Library + "\r\n\r\n OK to overwrite?", "&Yes", "&No") ==  0) {
+							//overwrite symbol
+								newXML += newSym;				
+							}
+							else {
+								newXML += symbols[i];
+							}
+						}
+						else {
+							newXML += symbols[i];
+						}
+					}
+					if (symFound == "false") newXML += newSym;
+					newXML += "</symbols>\n";
+
+					newXML += "<devicesets>\n";
+					string devFound = "false";
+					devName = xmlattribute(lbrFile, "eagle/drawing/library/devicesets/deviceset", "name");
+					string newDev = xmlelement(lbrFile, "eagle/drawing/library/devicesets/deviceset");
+					n = xmlelements(devices, oldXML, "eagle/drawing/library/devicesets/deviceset");
+					for (i = 0; i < n; ++i) {
+						string existDevName = xmlattribute(devices[i], "deviceset", "name");
+						if (existDevName == devName) {
+							devFound = "true";
+							if (dlgMessageBox("Device '" + devName + "' already exists in " + Library + "\r\n\r\n OK to overwrite?", "&Yes", "&No") ==  0) {
+							//overwrite device
+								newXML += newDev;				
+							}
+							else {
+								newXML += devices[i];
+							}
+						}
+						else {
+							newXML += devices[i];
+						}
+					}
+					if (devFound == "false") newXML += newDev;
+					newXML += "</devicesets>\n";		
+					
+					
+					// Replace characters that cause printf to fail.
+					string StrRepl[] = {"%", "%%"};
+					int o = 0;
+					for (int x = 0; StrRepl[x]; ) {
+					 o = strstr(newXML, StrRepl[x], o);
+					 if (o >= 0) {
+						newXML = strsub(newXML, 0, o) + StrRepl[x + 1] + strsub(newXML, o + strlen(StrRepl[x]));
+						o += strlen(StrRepl[x + 1]);
+					 }
+					 else {
+						x += 2;
+						o = 0;
+					 }
+					}		
+					newXML += "</library>\n</drawing>\n</eagle>";
+				
+					output(Library, "wtF")
+					printf(newXML);
+						
+				}
+				else {
+					lbrFile = neterror();
+				}
+				if (!ATLC) {
+				dlgMessageBox("Part " + devName + " has been added to " + Library);
+				}
+				if (!ShowAddPart) {
+					int dlg_addPart = dlgDialog("Add a part 1 of 2") {
+						dlgHBoxLayout {
+							dlgVBoxLayout {
+								dlgHBoxLayout dlgSpacing(940);
+								dlgTextView(getAddPartPage());
+								dlgPushButton("+Next") dlgAccept();
+								
+							}
+						dlgVBoxLayout dlgSpacing(460);
+						}
+						
+					};
+					int dlg_addPart2 = dlgDialog("Add a part 2 of 2") {
+						dlgHBoxLayout {
+							dlgVBoxLayout {
+								dlgHBoxLayout dlgSpacing(940);
+								dlgTextView(getAddPartPage2());
+								dlgPushButton("+Close") dlgAccept();
+								
+							}
+						dlgVBoxLayout dlgSpacing(460);
+						}
+						
+					};
+				}
+				if (CloseULP) {
+					SaveCfg();
+					dlgReject();
+				}
+			}
+		}
+		else {
+			dlgMessageBox("Please search for a part before clicking 'Add to Library'");
+		}
+	}
+}
+
+void InitCfg(void) {
+   usernameXML = cfgget("ULP:samacsys.Email");
+   username = strReplace(usernameXML,"@","%40");
+   password = cfgget("ULP:samacsys.Pass");
+   if (password == "") maskedPassword = "";
+   Library = cfgget("ULP:samacsys.Library");
+   if (Library == "") Library = EAGLE_HOME + "/EAGLE/libraries/SamacSys_Parts.lbr";
+   stepDir = cfgget("ULP:samacsys.StepFolder");
+   if (stepDir == "") stepDir = EAGLE_HOME + "/SamacSys_3D"; 
+}
+
+int DoSearch(string key)
+{
+    string Result;
+    string partno;
+    string alligatorURL;
+    if (username != "" && password != "") {
+		alligatorURL = "https://" + username + ":" + password + "@eagle.componentsearchengine.com/ga/alligatorHandler.php?use=EaglePlugin&detail=0&searchString=" + key + "&offset=0&country=GB&language=en&source=63&et=eagle&pv=2.2";
+    }
+	else {
+		alligatorURL = "https://eagle.componentsearchengine.com/alligatorHandler.php?use=EaglePlugin&detail=0&searchString=" + key + "&offset=0&country=GB&language=en&source=63&et=eagle&pv=2.2";
+    }  
+	if (netget(Result, alligatorURL)
+	>= 0) {
+		
+		parts = json_GetKeyItem(Result,"parts");
+		int n = json_GetArrayCount(parts);
+		
+		if (n == 0 || n == -1) {//No parts found
+			partsList[0] = "";
+			HTMLPane = "No parts found. <a href=\"https://eagle.componentsearchengine.com/ga/newPart.php\" target=\"_blank\">Request this part</a>";
+		}
+		else {
+			//store returned parts in an array
+			for (int i = 0; i < n; ++i) {
+				part = json_GetArrayItem(parts,i);
+				partsArray[i] = part;
+			}
+			partsList[n] = "";
+			//build parts into an array for displaying
+			for (i = 0; i < n; ++i) {
+				updatePartDetails(i);
+				partsList[i] = ecadM[1] + "\t" + ecadM[1] + "\t" + has3D[1] + "\t" + datasheet[1] + "\t" + desc[1] + "\t" + manuf[1] + "\t" + partNo[1];
+			}
+		}
+	}
+	else dlgMessageBox(neterror());
+	
+
+	selectedPart = -2;
+	SaveCfg();
+	return 1;
+}
+
+
+string login(string username, string password)
+{
+	string result;
+	if (netget(result, "https://" + username + ":" + password + "@eagle.componentsearchengine.com/ga/auth.txt?") >=0) {
+
+	}
+	else {
+		result = neterror();
+	}
+	return result; 
+}
+
+
+int writeSettingsXML(string username, string password)
+{
+	fileerror();
+	output(path_ulp[0] + "/samacsys.xml", "wt") {
+	printf("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
+	printf("<!--SamacSys EAGLE ULP-->\n");
+	printf("<Settings>\n");
+	printf("  <emailAddress>" + username + "</emailAddress>\n");
+	printf("  <password>" + password + "</password>\n");
+	printf("</Settings>\n");
+	}
+	if (fileerror())
+	exit(1);
+	return 1;
+}
+
+//***Initialisation***
+InitCfg();
+
+HTMLPane = getHomePage();
+
+int dlg_ret = dlgDialog("SamacSys Component Search Engine - Plugin " + version) {
+dlgGridLayout {
+	dlgCell(0, 0) dlgLabel("");
+	dlgCell(0, 1) dlgLabel("");
+	dlgCell(0, 2) dlgLabel("");
+	dlgCell(0, 3) dlgLabel("");
+	dlgCell(0, 4) dlgLabel("");
+	dlgCell(0, 5) dlgLabel("");
+	dlgCell(0, 6) dlgLabel("");
+	dlgCell(0, 7) dlgLabel("");
+	dlgCell(0, 8) dlgLabel("<b><a href=\"https://www.samacsys.com/eagle-library/\">Help</b>");
+}
+dlgTabWidget {
+	dlgTabPage("Selected Part Information") {
+		dlgTextView(HTMLPane);
+	}
+	dlgTabPage("Login/Settings") {
+		dlgVBoxLayout {
+			dlgGridLayout {
+				dlgCell(0, 2) dlgLabel("Email (User Name)");
+				dlgCell(0, 3) dlgStringEdit(usernameXML);
+				dlgCell(0, 4) dlgLabel("Password");
+				dlgCell(0, 5) dlgStringEdit(maskedPassword)
+				dlgCell(0, 6) dlgPushButton("Login"){
+					if (strReplace(usernameXML," ","") == "") {
+						dlgMessageBox("Please enter Username before attempting to Login.");
+					}
+					else {
+						username = urlEncode(usernameXML);
+						if (strReplace(maskedPassword," ","") == "") {
+							dlgMessageBox("Please enter Password before attempting to Login.");
+						}
+						else {
+							if (maskedPassword != "************") {
+								trimPassword = trim(maskedPassword);
+								password = urlEncode(trimPassword);
+							}
+							loginResponse = login(username, password);
+							if (loginResponse != "OK") {
+								maskedPassword = "";
+								dlgMessageBox("Login unsuccessful.  Please try again.");
+							}
+							else {
+								SaveCfg();
+								//writeSettingsXML(usernameXML, password);
+								maskedPassword = "************";
+								dlgMessageBox("Login successful");
+							}
+						}
+					}
+				}
+				dlgCell(1, 3) dlgLabel("<b><a href=\"https://eagle.componentsearchengine.com/register.php\">Not Registered?</b>");
+				dlgCell(1, 5) dlgLabel("<b><a href=\"https://eagle.componentsearchengine.com/resetPassword.php\">Forgot Password?</b>");
+				//dlgCell(2, 0) dlgLabel("Library");
+			}
+			dlgGridLayout {
+				dlgCell(1, 1) dlgLabel("Library");
+				dlgCell(1, 2) dlgStringEdit(Library);
+                dlgCell(1, 3) dlgPushButton("Browse"){
+					Library = dlgFileOpen("Select EAGLE Library", "", "*.lbr");
+					cfgset("ULP:samacsys.Library", Library);
+				}
+				dlgCell(2, 1) dlgLabel("3D Model Folder");
+				dlgCell(2, 2) dlgStringEdit(stepDir);
+				dlgCell(2, 3) dlgPushButton("Browse"){
+					stepDir = dlgDirectory("Select a 3D Model Folder","");
+					cfgset("ULP:samacsys.StepFolder", stepDir);
+				}
+			}
+			dlgCheckBox("Turn off \"Add to Library\" confirmation message", ATLC);
+			dlgCheckBox("Do not show \"Add a part\" pictorial instruction after Adding to Library", ShowAddPart);
+			dlgCheckBox("Close ULP after Adding to Library", CloseULP);
+			dlgCheckBox("Download 3D Models", Dnld3D);
+			dlgVBoxLayout dlgSpacing(135);
+		}
+	}
+}
+
+  string keyword = "";
+  dlgVBoxLayout {
+	 dlgHBoxLayout dlgSpacing(800);
+	dlgListView(partsListHeader, partsList, selectedPart)
+		if (dlgSelectionChanged()) {
+			ShowSelection();
+		}
+	 dlgHBoxLayout {
+	    dlgLabel("&Search keyword(s)", 1);
+		dlgStringEdit(keyword);
+		dlgPushButton("Search") {
+			getHomePage();
+			DoSearch(keyword);
+		}
+		dlgPushButton("Add to Library") {
+			if (username == "" || password == "" || Library == "<Please select a library>" || Library == "") {
+				if (username == "" || password == "") {
+					dlgMessageBox("Please go to the Login/Settings tab to Login");
+				}
+				if (Library == "<Please select a library>" || Library == "") {
+					dlgMessageBox("Please go to the Login/Settings tab and select a Library");
+				}
+			}
+			else {
+				getLbr(partId[0]);
+			}
+		}
+		dlgPushButton("Close") {
+			SaveCfg();
+			dlgReject();
+		}
+	 }
+  }
+}; // The ; is necessary here. Is this a bug of ULP ?
+if (dlg_ret == -1) {
+	SaveCfg();
+}
